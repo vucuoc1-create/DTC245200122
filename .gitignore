@@ -1,0 +1,12 @@
+# Environment variables (Sensitive)
+.env
+
+# Docker volume data if bind mounted
+*_data/
+.data/
+
+# OS and Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

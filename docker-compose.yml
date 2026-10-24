@@ -1,0 +1,99 @@
+services:
+  # ----------------------------------------------------------------------------
+  # Reverse Proxy Service (Nginx)
+  # Hardening: Security headers, version hiding, entry gateway for WordPress
+  # ----------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: blog_nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - wordpress
+    networks:
+      - blog_net
+
+  # ----------------------------------------------------------------------------
+  # Database Service (MySQL 8.0)
+  # Hardening: Isolated network, no host port exposed, healthcheck enabled
+  # ----------------------------------------------------------------------------
+  db:
+    image: mysql:8.0
+    container_name: blog_mysql
+    restart: unless-stopped
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - blog_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ----------------------------------------------------------------------------
+  # CMS Service (WordPress)
+  # Hardening: Connects to DB via internal network, port 80 only exposed internally
+  # ----------------------------------------------------------------------------
+  wordpress:
+    image: wordpress:php8.2-apache
+    container_name: blog_wordpress
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+      WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}
+      WORDPRESS_DEBUG: ${WORDPRESS_DEBUG:-0}
+    volumes:
+      - wordpress_data:/var/www/html
+    networks:
+      - blog_net
+
+  # ----------------------------------------------------------------------------
+  # Database Management Service (phpMyAdmin)
+  # Hardening: Restricted to internal DB host
+  # ----------------------------------------------------------------------------
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: blog_phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      UPLOAD_LIMIT: 64M
+    ports:
+      - "${PHPMYADMIN_PORT:-8081}:80"
+    networks:
+      - blog_net
+
+volumes:
+  db_data:
+    driver: local
+  wordpress_data:
+    driver: local
+
+networks:
+  blog_net:
+    name: blog_network
+    driver: bridge
